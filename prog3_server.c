@@ -503,7 +503,7 @@ int main(int argc, char **argv) {
 						#if DEBUG
 						printf("after clearing out move_msg -->  %s\n", move_msg);
 						#endif
-						move_msg = partic_usernames[i];
+						strcat(move_msg, partic_usernames[i]);
 
 						//check to see if valid move
 						if(move_valid = moveIsValid(player_move, game_board) == 1){
@@ -527,12 +527,12 @@ int main(int argc, char **argv) {
 						//send validity to observers
 						for(i = 0; i<max_observers; i++){
 							sd = observer_sds[i];
-							#if DEBUG
-							printf("sending move msg and game board msg to observer %d\n", sd);
-							#endif
-							
+						
 							//if this is a valid connected observer
 							if(sd >0){
+								#if DEBUG
+								printf("sending move msg and game board msg to observer %d\n", sd);
+								#endif
 								//send move_msg
 								if(send(sd, &move_msg, sizeof(move_msg), 0) <= 0){
 									fprintf((stderr), "Error: sending move_msg to observer %d\n", sd);
