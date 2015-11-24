@@ -1,3 +1,4 @@
+
 /* prog1_client.c - Modified from demo_client.c created by Brian Hutchinson.
  Lines 90+ written specifically for this assignment
  Cat Felts and Dannon Dixon
@@ -14,7 +15,7 @@
 #include <netdb.h>
 
 
-
+#define DEBUG 1
 /*------------------------------------------------------------------------
  * Program: client
  *
@@ -40,6 +41,8 @@ main( int argc, char **argv) {
   char *host; /* pointer to host name */
   int n; /* number of characters read */
   char buf[1000]; /* buffer for data from the server */
+
+
 
   memset((char *)&sad,0,sizeof(sad)); /* clear sockaddr structure */
   sad.sin_family = AF_INET; /* set family to Internet */
@@ -92,18 +95,27 @@ main( int argc, char **argv) {
 
   /* ----------- connected to server, recv game info ----------------- */
   int m = -1;
-  int game_info = -1;
-  fprintf(stderr, "Observer has connected to server.");
+  char game_info[1024];
+  char null_char[1];
+  null_char[0] = '\0';
+  fprintf(stderr, "Observer has connected to server.\n");
   while(1){
+    memset(&game_info[0], 0, sizeof(game_info));
     //recv messages from the server one char at a time
-    m = recv(sd, &game_info, 2, 0);
-    if(m <0){
-      fprintf(stderr, "Error: recv failed.");
+    if((m  = recv(sd, game_info, sizeof(game_info), 0))<= 0){
+      fprintf(stderr, "Error: recv failed. m = %d\n", m);
       exit(EXIT_FAILURE);
     }
-    else{
-      fprintf(stderr, "character recv'ed = %c\n", game_info);
-    }
+
+    #if DEBUG
+    printf("game info recv'd from server.\n");
+    #endif
+    strcat(game_info, null_char);
+    #if DEBUG
+    fprintf(stderr, "Message received-->\n");
+    #endif
+    fprintf(stderr," %s\n", game_info);
+
 
     //print everything directly to the console
   }

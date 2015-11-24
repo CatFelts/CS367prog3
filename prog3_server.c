@@ -11,6 +11,8 @@
 *11/15/15
 */
 
+
+
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
@@ -23,6 +25,7 @@
 #include <signal.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <time.h>
 
 #define QLEN 6 /* size of request queue */
@@ -41,9 +44,10 @@ enum{
 
 void init_board(char board[][BOARD_SIZE]);
 char *setup_board_message(char board[][BOARD_SIZE]);
+char * setup_leaderboard_msg(int scores[], char current_usernames[1024][32], int partic_sds[]);
 void printboard(char board[][BOARD_SIZE]);
 int moveIsValid(char move[], char board[][BOARD_SIZE]);
-int usernameIsValid(const char* username, char * current_usernames[1024]);
+int usernameIsValid(const char* username, char current_usernames[1024][32]);
 int blockIsValid(int row, int col, char val, char board[][BOARD_SIZE]);
 /*------------------------------------------------------------------------
 * Program: Network Sudoku
@@ -205,13 +209,12 @@ int main(int argc, char **argv) {
 
 	printf("Server running. Listening for clients...\n");
 
-	//================/!Open Connection!/=================//
-	double n = 0;       /* how much time has elapsed since round has begun */
-	double k = 0;       /* how much time has elapsed since the last round ended */
+	//================/!Open Connection!/=================/
+	bool game_in_play = true;
 	char y_reply = 'Y';
 	char n_reply = 'N';
-	char *partic_usernames[1024]; /* keep an array of the participants usernames  -- NEED TO MAKE [][]*/
-	uint32_t partic_scores[max_participants];    /* keep an array of the participants scores */
+	char partic_usernames[1024][32]; /* keep an array of the participants usernames  -- NEED TO MAKE [][]*/
+	int partic_scores[max_participants];    /* keep an array of the participants scores */
 	int move_valid = -1;         /* store the validity of checking a participants move */
 	int i = 0;
 	int activity, valread = 0;
@@ -234,8 +237,9 @@ int main(int argc, char **argv) {
 		participant_sds[i] = -1;
 		//also make all scores = 0
 		partic_scores[i] = 0;
-		partic_usernames[i] = '\0';
 	}
+
+	memset(partic_usernames, 0, sizeof(partic_usernames));
 
 
 
@@ -249,8 +253,15 @@ int main(int argc, char **argv) {
 	//initial starting conditions
 	pass_count = 0;
 	init_board(game_board);
-	char *board_msg = setup_board_message(game_board);
-	char * move_msg = (char *)malloc(70 * sizeof(char) +2);
+	char *board_msg = (char *)malloc(512 * sizeof(char) +2);
+	//char board_msg[1024];
+	board_msg = setup_board_message(game_board);
+	char move_msg[1024];
+	char full_msg[1024];
+	char *leaderboard_msg = (char *)malloc((50* 5 + 12)* sizeof(char) + 1 + 1);
+	char null_char[1];
+	null_char[0] = '\0';
+
 
 	//char *board_msg= "nothing here yet.";
 	//char *board_msg[8];
@@ -273,62 +284,83 @@ int main(int argc, char **argv) {
 		}
 		#endif
 
-		start = clock();
-		n = (double)(end - start)/CLOCKS_PER_SEC;
-		if(n < N){
-			alen = sizeof(cad); //client addr
+		alen = sizeof(cad); //client addr
 
+		#if DEBUG
+		printf("Waiting for connections...\n");
+		#endif
+
+
+
+
+
+
+		max_sd = 0;
+
+		//clear out fd_sets for observers and participants
+		FD_ZERO(&read_fds);
+
+		//add master sockets to read set
+		FD_SET(observ_sd, &read_fds);
+		FD_SET(partic_sd, &read_fds);
+
+		max_sd = observ_sd > partic_sd? observ_sd : partic_sd ;
+
+		//add all the participant and observer sockets
+		for(i = 0; i<max_participants; i++){
+			sd = participant_sds[i];
+			if( sd > 0){
+				FD_SET(participant_sds[i], &read_fds);
+				max_sd = sd > max_sd ? sd : max_sd ;
+			}
+		}
+		for(i = 0; i<max_observers; i++){
+			sd = observer_sds[i];
+			if(sd >0){
+				FD_SET(observer_sds[i], &read_fds);
+				max_sd = sd > max_sd ? sd : max_sd ;
+			}
+		}
+
+
+
+		//wait for an activity on one of the sockets, timeout == N
+		activity = select(max_sd +1, &read_fds, NULL, NULL, &stimeout);
+
+		if(activity < 0){
+			fprintf(stderr, "ERROR: select failed.\n");
+			exit(EXIT_FAILURE);
+		}
+		else if(activity == 0){
 			#if DEBUG
-			printf("Waiting for connections...\n");
+			fprintf(stderr, "select() timeout period expired.\n");
 			#endif
 
-			max_sd = 0;
+			if(game_in_play){
+				#if DEBUG
+				fprintf(stderr, "!!!Round ended!!!\n");
+				#endif
+				stimeout.tv_sec = (time_t)K;
+				game_in_play = false;
 
-			//clear out fd_sets for observers and participants
-			FD_ZERO(&read_fds);
+				//------------------send leaderboard to observers------------------
+				//causes seg fault
+				leaderboard_msg = setup_leaderboard_msg(partic_scores, partic_usernames, participant_sds);
 
-			//add master sockets to read set
-			FD_SET(observ_sd, &read_fds);
-			FD_SET(partic_sd, &read_fds);
-
-			max_sd = observ_sd > partic_sd? observ_sd : partic_sd ;
-
-			//add all the participant and observer sockets
-			for(i = 0; i<max_participants; i++){
-				sd = participant_sds[i];
-				if( sd > 0){
-					FD_SET(participant_sds[i], &read_fds);
-					max_sd = sd > max_sd ? sd : max_sd ;
-				}
 			}
-			for(i = 0; i<max_observers; i++){
-				sd = observer_sds[i];
-				if(sd >0){
-					FD_SET(observer_sds[i], &read_fds);
-					max_sd = sd > max_sd ? sd : max_sd ;
-				}
+			else if(!game_in_play){
+				#if DEBUG
+				fprintf(stderr, "!!!Inter-round ended. Start new round.!!!\n");
+				#endif
+
+				stimeout.tv_sec = (time_t)N;
+				game_in_play = true;
+
+				//-----------------------clear out gameboard------------------------
 			}
+		}
+		else{
 
-
-
-			//wait for an activity on one of the sockets, timeout == N
-			#if DEBUG
-			printf("Server has gotten to the select() functions.\n");
-			#endif
-
-
-			activity = select(max_sd +1, &read_fds, NULL, NULL, &stimeout);
-			#if DEBUG
-			printf("server has gotten past the select() function.\n");
-			#endif
-
-			if(activity < 0){
-				fprintf(stderr, "ERROR: select failed.\n");
-				exit(EXIT_FAILURE);
-			}
-			else if(activity == 0){
-				fprintf(stderr, "select() timeout period expired.\n");
-			}
 
 			//if something trying to read on the observer master socket, its an incoming connection
 			if(FD_ISSET( observ_sd, &read_fds)){
@@ -353,6 +385,7 @@ int main(int argc, char **argv) {
 						if(observer_sds[i] <= 0)
 						{
 							observer_sds[i] = sd1;
+
 							#if DEBUG
 							printf("adding to list of observer sockets as %d\n", i);
 							#endif
@@ -368,10 +401,6 @@ int main(int argc, char **argv) {
 			//else if something happened its an observer trying to close the connection
 			for(i = 0; i<max_observers; i++){
 				sd = observer_sds[i];
-
-				#if DEBUG
-				printf("Check if observer %d is trying to disconnect.\n", sd);
-				#endif
 
 				//if the participant on this socket wants to give the server something
 				if(FD_ISSET(sd, &read_fds)){
@@ -451,26 +480,30 @@ int main(int argc, char **argv) {
 						}
 					}
 
-					#if DEBUG
-					printf("participant has picked a valid username, \nAdd to array!\n");
-					#endif
-
 					//add new socket to array of sockets
 					for(i = 0; i<max_participants; i++){
+
 						//if position is empty
 						if(participant_sds[i] == -1){
 							participant_sds[i] = sd2;
 							//add the username to the list of partic_usernames
 							//sprintf(&partic_usernames[i], "%s", username);
-							partic_usernames[i] = username;
+							//partic_usernames[sd2][0] = *username;
+							strcpy(partic_usernames[sd2], username);
 							#if DEBUG
-							printf("adding to list of participant sockets as %d\n", i);
+							fprintf(stderr, "adding participant_sds[%d]--> %d\n", i, participant_sds[i]);
 							printf("added %s to list of usernames.\n", username);
 							#endif
 
 							break;
 						}
 					}
+
+					#if DEBUG
+					for(i = 0; i<max_participants; i++){
+						fprintf(stderr, "participant_sds[%d]--> %d\n", i, participant_sds[i]);
+					}
+					#endif
 				}
 			}
 
@@ -494,92 +527,98 @@ int main(int argc, char **argv) {
 
 					else{
 						//
-						strcat(player_move, "");
+						strcat(player_move, null_char);
 						#if DEBUG
 						printf("this is what was read from the participant: %s\n", player_move);
-						printf("clear out move_msg before writing to it\n");
 						#endif
-						move_msg = '\0';
-						#if DEBUG
-						printf("after clearing out move_msg -->  %s\n", move_msg);
-						#endif
-						char *temp = partic_usernames[i];
-						strcat(move_msg, temp);
+						if(game_in_play){
 
-						//check to see if valid move
-						if(move_valid = moveIsValid(player_move, game_board) == 1){
-							//update gameboard accordingly
-							game_board[(player_move[ROW]-64)-1][(player_move[COLUMN]-48)-1] = player_move[VALUE];
 
-							
-							strcat(move_msg, " made valid move ");
-							strcat(move_msg, player_move);
-							strcat(move_msg, "\n");
-							#if DEBUG
-							printf("current move_msg sending to observers-->  %s\n", move_msg);
-							#endif
-						}else{
-							//make invalid move message
-							strcat(move_msg, " attempted to make an invalid move.\n");
-						}
+							strcpy(full_msg, null_char);
+							strcpy(move_msg, null_char);
+							strcat(move_msg, partic_usernames[i]);
 
-						//send validity of move and game_board to all observers
-						board_msg = setup_board_message(game_board);
-						//send validity to observers
-						for(i = 0; i<max_observers; i++){
-							sd = observer_sds[i];
-						
-							//if this is a valid connected observer
-							if(sd >0){
+							//check to see if valid move
+							if(move_valid = moveIsValid(player_move, game_board) == 1){
+								//update gameboard accordingly
+								game_board[(player_move[ROW]-64)-1][(player_move[COLUMN]-48)-1] = player_move[VALUE];
+								//update players score
+								partic_scores[i] = partic_scores[i]+1;
+								board_msg = setup_board_message(game_board);
 								#if DEBUG
-								printf("sending move msg and game board msg to observer %d\n", sd);
+								fprintf(stderr, "size of board_msg--> %lu\n", sizeof(board_msg));
 								#endif
-								//send move_msg
-								if(send(sd, &move_msg, sizeof(move_msg), 0) <= 0){
-									fprintf((stderr), "Error: sending move_msg to observer %d\n", sd);
-									exit(EXIT_FAILURE);
-								}
-								//then send the board
-								if(send(sd, &board_msg, sizeof(board_msg), 0) <= 0){
-									fprintf((stderr), "Error: sending board_msg to observer %d\n", sd);
-									exit(EXIT_FAILURE);
+								strcat(move_msg, " made valid move ");
+								strcat(move_msg, player_move);
+								strcat(move_msg, "\n");
+								#if DEBUG
+								fprintf(stderr, "size of move_msg--> %lu\n", sizeof(move_msg));
+								#endif
+								strcat(full_msg, move_msg);
+								strcat(full_msg, board_msg);
+
+
+							}else{
+
+								partic_scores[i] = partic_scores[i]-1;
+								//make invalid move message
+								strcat(move_msg, " attempted to make an invalid move.\n");
+								strcat(full_msg, move_msg);
+
+							}
+							strcat(full_msg, null_char);
+
+							#if DEBUG
+							fprintf(stderr, "Size of full_msg--> %lu\n", sizeof(full_msg));
+							fprintf(stderr, "%s\n", full_msg );
+							#endif
+
+
+							//send validity to observers
+							for(i = 0; i<max_observers; i++){
+								sd = observer_sds[i];
+
+								//if this is a valid connected observer
+								if(sd >0){
+									#if DEBUG
+									printf("sending move msg and game board msg to observer %d\n", sd);
+									#endif
+									//send full_msg
+									if(send(sd, &full_msg, strlen(full_msg), 0) <= 0){
+										fprintf((stderr), "Error: sending move_msg to observer %d\n", sd);
+										exit(EXIT_FAILURE);
+									}
+
 								}
 
 							}
-
+						}
+						else{
+							#if DEBUG
+							fprintf(stderr, "Player attempted move while game not in play\n");
+							#endif
 						}
 					}
 				}
 
-				
-			}
 
-			end = clock();
-			#if DEBUG
-			printf("end of cycle.\n");
-			#endif
-
-		}
-		//see if its the end of the round
-		else{
-			#if DEBUG
-			printf("end of round.\n");
-			#endif
-
-			//send leaderboard to observers
-
-			//reset round clock
-			n = 0;
-
-			//wait for K seconds before starting another round
-			while(k < K){
-				start = clock();
-				end = clock();
-				k = (double)(end - start)/CLOCKS_PER_SEC;
 			}
 		}
-		//game loop end
-		//send leaderboard to all observers
+
+		#if DEBUG
+		for(i = 0; i < max_participants; i++){
+			fprintf(stderr, "partic[%d] score ---> %d\n", i, partic_scores[i]);
+		}
+		#endif
+
+		#if DEBUG
+		fprintf(stderr, "---------------end of cycle.-------------------\n");
+		if(game_in_play)
+			fprintf(stderr, "GAME IN PLAY.\n");
+		else
+			fprintf(stderr, "GAME NOT IN PLAY.\n");
+		#endif
+
 	}
 
 	//main end
@@ -637,18 +676,100 @@ char * setup_board_message(char board[][BOARD_SIZE]){
 				strcat(msg, "  ");
 			}else{
 				c_to_str[0] = board[i][j];
+				strcat(msg, " ");
 				strcat(msg, c_to_str);
 			}
 		}
 		strcat(msg, " |");
 	}
 	strcat(msg, "\n--+-------+-------+-------+\n");
-
+	#if DEBUG
+	printf("%s\n", msg);
+	#endif
 	return msg;
 }
 
 
+char * setup_leaderboard_msg(int scores[], char current_usernames[1024][32], int partic_sds[]){
+	char * leaders = (char *)malloc((50* 5 + 12)* sizeof(char) + 1 + 1);
+	leaders[0] = '\0';
+	int i;
+	int count = 0;
+	int temp_score;
 
+	//find the top 5 scores
+	int top_scores[5] = { scores[0], scores[0], scores[0], scores[0], scores[0]};
+	int sds[5] = {-2, -2, -2, -2 , -2};
+
+	for(i = 0; i<sizeof(partic_sds); i++){
+		if(partic_sds[i] > 0)
+			count++;
+		temp_score = scores[i];
+		if(temp_score > top_scores[0]){
+			top_scores[4] = top_scores[3];
+			top_scores[3] = top_scores[2];
+			top_scores[2] = top_scores[1];
+			top_scores[1] = top_scores[0];
+			top_scores[0] = temp_score;
+			sds[0] = partic_sds[i];
+		}
+		else if(temp_score > top_scores[1]){
+			top_scores[4] = top_scores[3];
+			top_scores[3] = top_scores[2];
+			top_scores[2] = top_scores[1];
+			top_scores[1] = temp_score;
+			sds[1] = partic_sds[i];
+		}
+		else if(temp_score > top_scores[2]){
+			top_scores[4] = top_scores[3];
+			top_scores[3] = top_scores[2];
+			top_scores[2] =  temp_score;
+			sds[2] = partic_sds[i];
+		}else if(temp_score > top_scores[3]){
+			top_scores[4] = top_scores[3];
+			top_scores[3] = temp_score;
+			sds[3] = partic_sds[i];
+		}else if(temp_score > top_scores[4]){
+			top_scores[4] = temp_score;
+			sds[4] = partic_sds[i];
+		}
+	}
+
+
+	//build the message
+	strcat(leaders, "Leaderboard:\n");
+
+	for(i = 0; i<count; i++){
+		if(i == 5)
+			break;
+		char place[3];
+		sprintf(place, "%d) ", i+1);
+
+		strcat(leaders, place);
+		int sd = sds[i];
+		#if DEBUG
+		fprintf(stderr, "%s\n", current_usernames[sd]);
+		#endif
+		//strcat(leaders, current_usernames[sd]);
+		//strcat(leaders, " has ");
+		//char score[4];
+		//sprintf(score, "%d", top_scores[i]);
+		//strcat(leaders, score);
+		//strcat(leaders, " points\n");
+
+	}
+
+
+
+
+	#if DEBUG
+	fprintf(stderr, "Leaderboard msg----> \n%s\n", leaders);
+	#endif
+
+
+
+	return leaders;
+}
 
 
 
@@ -665,6 +786,14 @@ int moveIsValid(char move[], char board[][BOARD_SIZE]){
 	int col;
 	char val;
 	int i,j;
+
+	//if not row is not a captiol letter
+	if(!(64 < move[0] && move[0] < 91))
+	return 0;
+	else if(!(48 < move[1] && move[1] < 58))
+	return 0;
+	else if(!(48 < move[2] && move[2] < 58))
+	return 0;
 
 	//parse player move;
 	row = (move[ROW] - 64)-1; //ascii conversion
@@ -710,50 +839,49 @@ int moveIsValid(char move[], char board[][BOARD_SIZE]){
 }
 
 
-int usernameIsValid(const char* username, char * current_usernames[1024]){
+int usernameIsValid(const char* username, char current_usernames[1024][32]){
 	int username_index = 0;
 	char l = username[username_index];
-	char *name = (char *)malloc(30 * sizeof(char) +2);
+	char name[32];
+	//char *name = (char *)malloc(30 * sizeof(char) +2);
 	int i;
 
-	// -----------------------------NEED TO CMP TO PREV USERNAMES ------------------
-	/*
+
 	for(i = 0; i<sizeof(current_usernames); i++){
-	strcpy(name, current_usernames[i]);
-	//if this username has already been used in this game, return -1
-	if(strcmp(name, username)==0)
+		strcpy(name, current_usernames[i]);
+		//if this username has already been used in this game, return -1
+		if(strcmp(name, username)==0)
+		return -1;
+	}
+
+
+	//if the username is longer than permitted return -1
+	if(sizeof(username) > 30)
 	return -1;
-}
-*/
 
 
-//if the username is longer than permitted return -1
-if(sizeof(username) > 30)
-return -1;
-
-
-while(username[username_index]!='\0' && username_index <= strlen(username)){
-	l = username[username_index];
-	fprintf(stderr, "letter at index %d = %c\n", username_index, l);
-	//if the letter is not a number
-	if(!(48<=l && 57>= l)){
-		//and if the letter is not a capitol letter
-		if(!(65<=l && 90>= l)){
-			//and if the letter is not a lowercase letter
-			if(!(97<= l && 122 >= l)){
-				//if the username contains characters that are not alpha numberics return -1
-				return -1;
+	while(username[username_index]!='\0' && username_index <= strlen(username)){
+		l = username[username_index];
+		fprintf(stderr, "letter at index %d = %c\n", username_index, l);
+		//if the letter is not a number
+		if(!(48<=l && 57>= l)){
+			//and if the letter is not a capitol letter
+			if(!(65<=l && 90>= l)){
+				//and if the letter is not a lowercase letter
+				if(!(97<= l && 122 >= l)){
+					//if the username contains characters that are not alpha numberics return -1
+					return -1;
+				}
 			}
 		}
+		username_index++;
 	}
-	username_index++;
-}
 
-//the username is valid return 1
-#if DEBUG
-printf("username %s is valid.\n", username);
-#endif
-return 1;
+	//the username is valid return 1
+	#if DEBUG
+	printf("username %s is valid.\n", username);
+	#endif
+	return 1;
 }
 
 

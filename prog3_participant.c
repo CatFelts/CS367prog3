@@ -140,10 +140,6 @@ int main( int argc, char **argv) {
 	//game loop
 	while (1) {
 
-		#if DEBUG
-		printf("participant entered game loop! (: \n");
-		#endif
-
 		//make a move
 		printf("Enter a valid move: \n");
 		scanf("%s", input);
