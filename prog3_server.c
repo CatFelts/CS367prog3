@@ -503,7 +503,8 @@ int main(int argc, char **argv) {
 						#if DEBUG
 						printf("after clearing out move_msg -->  %s\n", move_msg);
 						#endif
-						strcat(move_msg, partic_usernames[i]);
+						char *temp = partic_usernames[i];
+						strcat(move_msg, temp);
 
 						//check to see if valid move
 						if(move_valid = moveIsValid(player_move, game_board) == 1){
