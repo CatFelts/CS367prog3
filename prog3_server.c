@@ -497,43 +497,60 @@ int main(int argc, char **argv) {
 						strcat(player_move, "");
 						#if DEBUG
 						printf("this is what was read from the participant: %s\n", player_move);
+						printf("clear out move_msg before writing to it\n");
 						#endif
+						move_msg = '\0';
+						#if DEBUG
+						printf("after clearing out move_msg -->  %s\n", move_msg);
+						#endif
+						move_msg = partic_usernames[i];
 
 						//check to see if valid move
 						if(move_valid = moveIsValid(player_move, game_board) == 1){
 							//update gameboard accordingly
 							game_board[(player_move[ROW]-64)-1][(player_move[COLUMN]-48)-1] = player_move[VALUE];
-							#if DEBUG
-							printf("clear out move_msg before writing to it\n");
-							#endif
-							move_msg = '\0';
-							#if DEBUG
-							printf("after clearing out move_msg -->  %s\n", move_msg);
-							#endif
 
-
-							move_msg = partic_usernames[i];
+							
 							strcat(move_msg, " made valid move ");
 							strcat(move_msg, player_move);
 							strcat(move_msg, "\n");
 							#if DEBUG
-							printf("current move_msg -->  %s\n", move_msg);
+							printf("current move_msg sending to observers-->  %s\n", move_msg);
 							#endif
+						}else{
+							//make invalid move message
+							strcat(move_msg, " attempted to make an invalid move.\n");
 						}
+
+						//send validity of move and game_board to all observers
+						board_msg = setup_board_message(game_board);
 						//send validity to observers
 						for(i = 0; i<max_observers; i++){
 							sd = observer_sds[i];
+							#if DEBUG
+							printf("sending move msg and game board msg to observer %d\n", sd);
+							#endif
+							
 							//if this is a valid connected observer
 							if(sd >0){
 								//send move_msg
+								if(send(sd, &move_msg, sizeof(move_msg), 0) <= 0){
+									fprintf((stderr), "Error: sending move_msg to observer %d\n", sd);
+									exit(EXIT_FAILURE);
+								}
+								//then send the board
+								if(send(sd, &board_msg, sizeof(board_msg), 0) <= 0){
+									fprintf((stderr), "Error: sending board_msg to observer %d\n", sd);
+									exit(EXIT_FAILURE);
+								}
+
 							}
 
 						}
 					}
 				}
 
-				//send validity of move and game_board to all observers
-				board_msg = setup_board_message(game_board);
+				
 			}
 
 			end = clock();
