@@ -29,7 +29,7 @@
 #include <time.h>
 
 #define QLEN 6 /* size of request queue */
-#define DEBUG 0
+#define DEBUG 1
 #define MAX_ANSWER 1000 //max for 9x9 gameboard
 #define BOARD_SIZE 9
 #define MAX_VALID_MOVES BOARD_SIZE * BOARD_SIZE
@@ -47,12 +47,12 @@ struct player {
 	bool in_play;
 };
 
-void clear_board(char board[][BOARD_SIZE]);
+void init_board(char board[][BOARD_SIZE]);
 char *setup_board_message(char board[][BOARD_SIZE]);
-char * setup_leaderboard_msg(struct player players[], int people_size, int partic_sds[]);
+char * setup_leaderboard_msg(struct player playersp[], char current_usernames[1024][32], int partic_sds[]);
 void printboard(char board[][BOARD_SIZE]);
 int moveIsValid(char move[], char board[][BOARD_SIZE]);
-int usernameIsValid(const char* username, struct player players[]);
+int usernameIsValid(const char* username, char current_usernames[1024][32]);
 int blockIsValid(int row, int col, char val, char board[][BOARD_SIZE]);
 /*------------------------------------------------------------------------
 * Program: Network Sudoku
@@ -215,23 +215,24 @@ int main(int argc, char **argv) {
 	printf("Server running. Listening for clients...\n");
 
 	//================/!Open Connection!/=================/
-	bool game_in_play = true;	  /* keep track of game status */
+	bool game_in_play = true;
 	char y_reply = 'Y';
 	char n_reply = 'N';
-	struct player players[1024]; /*keep an array of current players(participants)*/
+	char used_usernames[1024][32]; /* keep an array of the participants usernames  -- NEED TO MAKE [][]*/
+	struct player players[max_participants]; /*keep an array of current players(participants)*/
 	int move_valid = -1;         /* store the validity of checking a participants move */
 	int i = 0;
-	int partic_count = 0;	      /* count how many participants have connected during the entire game */
-	int player_index = 0;			/* index into the struct player array */
-	int activity, valread = 0;	/*references to values returned by select and recv functions */
+	int player_index = 0;
+	int username_index = 0;
+	int activity, valread = 0;
 	int num_observers = 0;       /* number of observers currently connected */
 	int num_participants = 0;       /* number of participants currently connected */
 	int sd = 0;        /* place holder to keep track of current socket descriptor */
-	int max_sd =0 ;   /* reference to the maximum socket descriptor value */
+	int max_sd =0 ;
 	clock_t start, end;     /* a reference to the time at the start and end of a round */
 	int observer_sds[max_observers]; /* a reference to all the observer socket descriptors */
 	int participant_sds[max_participants]; /*a reference to all the participant socket descriptors */
-	fd_set read_fds;		/* the read set of socket descriptors to be*/
+	fd_set read_fds;
 	FD_ZERO(&read_fds);
 	struct timeval stimeout = {N, 0};
 
@@ -245,11 +246,13 @@ int main(int argc, char **argv) {
 
 	memset(players, '\0', sizeof(players));
 
+	memset(used_usernames, 0, sizeof(used_usernames));
+
 
 
 	//initial starting conditions
 	pass_count = 0;
-	clear_board(game_board);
+	init_board(game_board);
 	char *board_msg = (char *)malloc(512 * sizeof(char) +2);
 	//char board_msg[1024];
 	board_msg = setup_board_message(game_board);
@@ -264,6 +267,9 @@ int main(int argc, char **argv) {
 	printf("%s\n",board_msg);
 	#endif
 
+
+
+
 	/* Main server loop - accept and handle requests
 	/* game loop */
 	while (1) {
@@ -271,7 +277,7 @@ int main(int argc, char **argv) {
 		printf("list of current usernames = \n");
 		for(i = 0; i<max_participants; i++){
 			if(players[i].in_play)
-			printf("[%d] = %s\n", i, players[i].username);
+				printf("[%d] = %s\n", i, players[i].username);
 		}
 		#endif
 
@@ -280,6 +286,10 @@ int main(int argc, char **argv) {
 		#if DEBUG
 		printf("Waiting for connections...\n");
 		#endif
+
+
+
+
 
 
 		max_sd = 0;
@@ -324,44 +334,26 @@ int main(int argc, char **argv) {
 			#endif
 
 			if(game_in_play){
-
-				fprintf(stderr, "\n<---!!!END OF ROUND!!!--->\n");
-
+				#if DEBUG
+				fprintf(stderr, "!!!Round ended!!!\n");
+				#endif
 				stimeout.tv_sec = (time_t)K;
 				game_in_play = false;
 
-
 				//------------------send leaderboard to observers------------------
-				leaderboard_msg = setup_leaderboard_msg(players, partic_count, participant_sds);
-				strcpy(full_msg, null_char);
-				strcat(full_msg, leaderboard_msg);
-				#if DEBUG
-				fprintf(stderr, "message to be sent to observers:\n%s\n", full_msg);
-				#endif
-
-				for(i = 0; i<max_observers; i++){
-					sd = observer_sds[i];
-					//if this is a valid connected observer, send the leaderboard
-					if(sd > 0){
-						if(send(sd, &full_msg, strlen(full_msg), 0) <= 0){
-							fprintf(stderr, "Error: sending leaderboard_msg to observer %d", sd);
-							exit(EXIT_FAILURE);
-						}
-						#if DEBUG
-						fprintf(stderr, "Sent leaderboard to observer %d\n", sd);
-						#endif
-					}
-				}
+				//causes seg fault
+				leaderboard_msg = setup_leaderboard_msg(players, used_usernames, participant_sds);
 
 			}
 			else if(!game_in_play){
-				fprintf(stderr, "\n<---!!!BEGINNING OF NEW ROUND!!!--->\n\n");
+				#if DEBUG
+				fprintf(stderr, "!!!Inter-round ended. Start new round.!!!\n");
+				#endif
 
 				stimeout.tv_sec = (time_t)N;
 				game_in_play = true;
 
 				//-----------------------clear out gameboard------------------------
-				clear_board(game_board);
 			}
 		}
 		else{
@@ -434,22 +426,17 @@ int main(int argc, char **argv) {
 				}
 
 				//if there is already the max number of participants, then immediately close the connection
-				if(num_participants == max_participants){
+				if(num_participants == max_participants)
 					close(sd2);
-					#if DEBUG
-					fprintf(stderr, "max participants already connected.\n");
-					#endif
-				}
 				else{
 					num_participants++;
-					partic_count++;
 					#if DEBUG
 					printf("New participant connected, socket fd is %d\n", sd2);
 					#endif
 
 					// ------------------------- get username and send validity---------
 					int username_valid = -1;
-					char username[200];
+					char username[64];
 
 
 					while(username_valid != 1){
@@ -458,11 +445,9 @@ int main(int argc, char **argv) {
 							fprintf(stderr, "Error: Could not recv username from participant.\n");
 							exit(EXIT_FAILURE);
 						}
-						#if DEBUG
-						fprintf(stderr, "username entered = %s\nusername length = %d\n", username, (int)strlen(username));
-						#endif
+
 						//check for validity of username
-						username_valid = usernameIsValid(username, players);
+						username_valid = usernameIsValid(username, used_usernames);
 						#if DEBUG
 						printf("is username valid? --> %d\n", username_valid);
 						#endif
@@ -470,6 +455,9 @@ int main(int argc, char **argv) {
 						//send validity of username
 						if(username_valid == 1){
 							//send 'Y" to participant
+							#if DEBUG
+							printf("sending 'Y' to participant.\n");
+							#endif
 
 							if(send(sd2, &y_reply, sizeof(y_reply), 0) <= 0){
 								fprintf(stderr, "Error: reply y to participant's username.\n");
@@ -479,6 +467,9 @@ int main(int argc, char **argv) {
 
 						}else{
 							//send 'N' to participant
+							#if DEBUG
+							printf("sending 'N' to participant.\n");
+							#endif
 							if(send(sd2, &n_reply, sizeof(n_reply), 0)<= 0){
 								fprintf(stderr, "Error: reply n to participant's username.\n");
 								exit(EXIT_FAILURE);
@@ -549,7 +540,7 @@ int main(int argc, char **argv) {
 
 							strcpy(full_msg, null_char);
 							strcpy(move_msg, null_char);
-							strcpy(move_msg, players[i].username);
+							strcat(move_msg, players[i].username);
 
 							//check to see if valid move
 							if(move_valid = moveIsValid(player_move, game_board) == 1){
@@ -558,9 +549,15 @@ int main(int argc, char **argv) {
 								//update players score
 								players[i].score = players[i].score +1;
 								board_msg = setup_board_message(game_board);
+								#if DEBUG
+								fprintf(stderr, "size of board_msg--> %lu\n", sizeof(board_msg));
+								#endif
 								strcat(move_msg, " made valid move ");
 								strcat(move_msg, player_move);
 								strcat(move_msg, "\n");
+								#if DEBUG
+								fprintf(stderr, "size of move_msg--> %lu\n", sizeof(move_msg));
+								#endif
 								strcat(full_msg, move_msg);
 								strcat(full_msg, board_msg);
 
@@ -572,6 +569,14 @@ int main(int argc, char **argv) {
 								strcat(full_msg, move_msg);
 
 							}
+							strcat(full_msg, null_char);
+
+							#if DEBUG
+							fprintf(stderr, "Size of full_msg--> %lu\n", sizeof(full_msg));
+							fprintf(stderr, "%s\n", full_msg );
+							#endif
+
+
 							//send validity to observers
 							for(i = 0; i<max_observers; i++){
 								sd = observer_sds[i];
@@ -612,9 +617,9 @@ int main(int argc, char **argv) {
 		#if DEBUG
 		fprintf(stderr, "---------------end of cycle.-------------------\n");
 		if(game_in_play)
-		fprintf(stderr, "GAME IN PLAY.\n");
+			fprintf(stderr, "GAME IN PLAY.\n");
 		else
-		fprintf(stderr, "GAME NOT IN PLAY.\n");
+			fprintf(stderr, "GAME NOT IN PLAY.\n");
 		#endif
 
 	}
@@ -626,7 +631,7 @@ int main(int argc, char **argv) {
 *Ouput: none
 *Initialize all board elements to '0'
 */
-void clear_board(char board[][BOARD_SIZE]){
+void init_board(char board[][BOARD_SIZE]){
 	int i,j;
 	char row = 'A';
 	char col;
@@ -653,7 +658,7 @@ char * setup_board_message(char board[][BOARD_SIZE]){
 	char c_to_str[2];
 	c_to_str[1] = '\0';
 	c_to_str[0] = row;
-	char * str1 = " | 1 2 3 | 4 5 6 | 7 8 9 |";
+	char * str1 = "  | 1 2 3 | 4 5 6 | 7 8 9 |";
 	strcat(msg, str1);
 
 	for(i = 0; i < BOARD_SIZE; i++){
@@ -681,72 +686,57 @@ char * setup_board_message(char board[][BOARD_SIZE]){
 		strcat(msg, " |");
 	}
 	strcat(msg, "\n--+-------+-------+-------+\n");
+	#if DEBUG
+	printf("%s\n", msg);
+	#endif
 	return msg;
 }
 
 
-char * setup_leaderboard_msg(struct player people[], int people_size, int partic_sds[]){
+char * setup_leaderboard_msg(struct player people[], char current_usernames[1024][32], int partic_sds[]){
 	char * leaders = (char *)malloc((50* 5 + 12)* sizeof(char) + 1 + 1);
 	leaders[0] = '\0';
-	char null_char[1];
-	null_char[0] = '\0';
 	int i;
 	int count = 0;
 	int temp_score;
-	struct player temp_player;
-	temp_player.sd = -2;
-	strcpy(temp_player.username, "unregistered player");
-	temp_player.in_play = false;
-	temp_player.score = -1000;
-
-
+/*
 	//find the top 5 scores
-	struct player top_players[5];
-	for(i = 0; i<5; i++){
-		top_players[i] = temp_player;
-	}
+	int top_scores[5] = { scores[0], scores[0], scores[0], scores[0], scores[0]};
+	int sds[5] = {-2, -2, -2, -2 , -2};
 
-
-	for(i = 0; i<people_size; i++){
-		struct player partic = people[i];
-		count++;
-		#if DEBUG
-		fprintf(stderr, "looking at player %d----> %s\n", i, partic.username);
-		#endif
-
-		temp_score = partic.score;
-		if(temp_score >= top_players[0].score || top_players[0].sd == -2){
-			top_players[4] = top_players[3];
-			top_players[3] = top_players[2];
-			top_players[2] = top_players[1];
-			top_players[1] = top_players[0];
-			top_players[0] = partic;
+	for(i = 0; i<sizeof(partic_sds); i++){
+		if(partic_sds[i] > 0)
+			count++;
+		temp_score = scores[i];
+		if(temp_score > top_scores[0]){
+			top_scores[4] = top_scores[3];
+			top_scores[3] = top_scores[2];
+			top_scores[2] = top_scores[1];
+			top_scores[1] = top_scores[0];
+			top_scores[0] = temp_score;
+			sds[0] = partic_sds[i];
 		}
-		else if(temp_score >= top_players[1].score || top_players[1].sd == -2){
-			top_players[4] = top_players[3];
-			top_players[3] = top_players[2];
-			top_players[2] = top_players[1];
-			top_players[1] = partic;
+		else if(temp_score > top_scores[1]){
+			top_scores[4] = top_scores[3];
+			top_scores[3] = top_scores[2];
+			top_scores[2] = top_scores[1];
+			top_scores[1] = temp_score;
+			sds[1] = partic_sds[i];
 		}
-		else if(temp_score >= top_players[2].score || top_players[2].sd == -2){
-			top_players[4] = top_players[3];
-			top_players[3] = top_players[2];
-			top_players[2] = partic;
-		}else if(temp_score >= top_players[3].score || top_players[3].sd == -2){
-			top_players[4] = top_players[3];
-			top_players[3] =partic;
-		}else if(temp_score >= top_players[4].score || top_players[4].sd == -2){
-			top_players[4] = partic;
+		else if(temp_score > top_scores[2]){
+			top_scores[4] = top_scores[3];
+			top_scores[3] = top_scores[2];
+			top_scores[2] =  temp_score;
+			sds[2] = partic_sds[i];
+		}else if(temp_score > top_scores[3]){
+			top_scores[4] = top_scores[3];
+			top_scores[3] = temp_score;
+			sds[3] = partic_sds[i];
+		}else if(temp_score > top_scores[4]){
+			top_scores[4] = temp_score;
+			sds[4] = partic_sds[i];
 		}
-
 	}
-
-	#if DEBUG
-	for(i = 0; i<5; i++){
-		fprintf(stderr, "top_player # %d --- > %s\n", i, top_players[i].username);
-
-	}
-	#endif
 
 
 	//build the message
@@ -754,20 +744,21 @@ char * setup_leaderboard_msg(struct player people[], int people_size, int partic
 
 	for(i = 0; i<count; i++){
 		if(i == 5)
-		break;
-		struct player top_player = top_players[i];
-		if(top_player.sd != -2){
-			char place[3];
-			sprintf(place, "%d) ", i+1);
+			break;
+		char place[3];
+		sprintf(place, "%d) ", i+1);
 
-			strcat(leaders, place);
-			strcat(leaders, top_player.username);
-			strcat(leaders, " has ");
-			char score[4];
-			sprintf(score, "%d", top_player.score);
-			strcat(leaders, score);
-			strcat(leaders, " points\n");
-		}
+		strcat(leaders, place);
+		int sd = sds[i];
+		#if DEBUG
+		fprintf(stderr, "%s\n", current_usernames[sd]);
+		#endif
+		//strcat(leaders, current_usernames[sd]);
+		//strcat(leaders, " has ");
+		//char score[4];
+		//sprintf(score, "%d", top_scores[i]);
+		//strcat(leaders, score);
+		//strcat(leaders, " points\n");
 
 	}
 
@@ -777,61 +768,13 @@ char * setup_leaderboard_msg(struct player people[], int people_size, int partic
 	#if DEBUG
 	fprintf(stderr, "Leaderboard msg----> \n%s\n", leaders);
 	#endif
+	*/
 
-	strcat(leaders, null_char);
 
 
 	return leaders;
 }
 
-
-int usernameIsValid(const char* username, struct player players[]){
-	int username_index = 0;
-	char l = username[username_index];
-	char name[32];
-	int i;
-
-	#if DEBUG
-	fprintf(stderr, "length of username entered by user -------> %d", (int)strlen(username));
-	#endif
-	if(strlen(username) >30)
-	return -1;
-	for(i = 0; i<sizeof(players); i++){
-		strcpy(name, players[i].username);
-		//if this username has already been used in this game, return -1
-		if(strcmp(name, username)==0)
-		return -1;
-	}
-
-
-	//if the username is longer than permitted return -1
-	if(sizeof(username) > 30)
-	return -1;
-
-
-	while(username[username_index]!='\0' && username_index <= strlen(username)){
-		l = username[username_index];
-		//if the letter is not a number
-		if(!(48<=l && 57>= l)){
-			//and if the letter is not a capitol letter
-			if(!(65<=l && 90>= l)){
-				//and if the letter is not a lowercase letter
-				if(!(97<= l && 122 >= l)){
-					//and if the letter is not a whitespace or underscore
-					if(!(l == 32 || l == 95))
-					return -1;
-				}
-			}
-		}
-		username_index++;
-	}
-
-	//the username is valid return 1
-	#if DEBUG
-	printf("username %s is valid.\n", username);
-	#endif
-	return 1;
-}
 
 
 /*Input: player's char move[], game_board[][].
@@ -865,7 +808,6 @@ int moveIsValid(char move[], char board[][BOARD_SIZE]){
 	printf("CHAR MOVE: row:%c, col:%c, val:%c\n", move[0], move[1], move[2]);
 	printf("\nplayer move: Row: %d, Col: %d, Value: %c\n", row, col, val);
 	printf("Element at %d, %d = '%c'\n", row, col, board[row][col]);
-	fprintf(stderr, "\n\n\n----------------------\n0 mod 3 = %d\n", 0%3);
 	#endif
 
 	//check if element is available
@@ -900,28 +842,69 @@ int moveIsValid(char move[], char board[][BOARD_SIZE]){
 	}
 }
 
+
+int usernameIsValid(const char* username, char current_usernames[1024][32]){
+	int username_index = 0;
+	char l = username[username_index];
+	char name[32];
+	//char *name = (char *)malloc(30 * sizeof(char) +2);
+	int i;
+
+
+	for(i = 0; i<sizeof(current_usernames); i++){
+		strcpy(name, current_usernames[i]);
+		//if this username has already been used in this game, return -1
+		if(strcmp(name, username)==0)
+		return -1;
+	}
+
+
+	//if the username is longer than permitted return -1
+	if(sizeof(username) > 30)
+	return -1;
+
+
+	while(username[username_index]!='\0' && username_index <= strlen(username)){
+		l = username[username_index];
+		fprintf(stderr, "letter at index %d = %c\n", username_index, l);
+		//if the letter is not a number
+		if(!(48<=l && 57>= l)){
+			//and if the letter is not a capitol letter
+			if(!(65<=l && 90>= l)){
+				//and if the letter is not a lowercase letter
+				if(!(97<= l && 122 >= l)){
+					//if the username contains characters that are not alpha numberics return -1
+					return -1;
+				}
+			}
+		}
+		username_index++;
+	}
+
+	//the username is valid return 1
+	#if DEBUG
+	printf("username %s is valid.\n", username);
+	#endif
+	return 1;
+}
+
+
+/* ---------------------------------------------------------------------------------*/
+/* ----------------- NEED TO REDO THIS!!!!!!!! -------------------------------------*/
+/* ---------------------------------------------------------------------------------*/
+
+
+
+
 /*Input: input row, col val and gameboard.
 *Output: 1 for valid 0 for invalid.
 *Checks the sudoku block the users input is within. returns true if there
 *are no duplicate values, else false.
 */
-int blockIsValid(int row, int col, char val, char board[][BOARD_SIZE]){\
-	int block_row, block_col;
+int blockIsValid(int row, int col, char val, char board[][BOARD_SIZE]){
+	int block_row = (row-1) % 3;
+	int block_col = (col-1) % 3;
 	int i,j;
-
-	if(row < 3)
-	block_row = 0;
-	else if(row >2 && row <6)
-	block_row = 1;
-	else if(row >5 && row <9)
-	block_row = 2;
-
-	if(col < 3)
-	block_col = 0;
-	else if(col > 2 && col < 6)
-	block_col = 1;
-	else if(col > 5 && col < 9)
-	block_col = 2;
 
 	#if DEBUG
 	printf("block: row:%d, col: %d\n", block_row+1, block_col+1);
@@ -934,64 +917,56 @@ int blockIsValid(int row, int col, char val, char board[][BOARD_SIZE]){\
 				return 0;
 			}
 		}
-	}
-	if(block_row == 0 && block_col == 1){
+	}else if(block_row == 0 && block_col == 1){
 		for(i = 0; i<3; i++){
 			for(j = 3; j<6; j++){
 				if(board[i][j] == val)
 				return 0;
 			}
 		}
-	}
-	if(block_row == 0 && block_col == 2){
+	}else if(block_row == 0 && block_col == 2){
 		for(i = 1; i<3; i++){
 			for(j = 6; j<9; j++){
 				if(board[i][j] == val)
 				return 0;
 			}
 		}
-	}
-	if(block_row == 1 && block_col == 0){
+	}else if(block_row == 1 && block_col == 0){
 		for(i = 3; i<6; i++){
 			for(j = 0; j<3; j++){
 				if(board[i][j] == val)
 				return 0;
 			}
 		}
-	}
-	if(block_row == 1 && block_col == 1){
+	}else if(block_row == 1 && block_col == 1){
 		for(i = 3; i<6; i++){
 			for(j = 3; j<6; j++){
 				if(board[i][j] == val)
 				return 0;
 			}
 		}
-	}
-	if(block_row == 1 && block_col == 2){
+	}else if(block_row == 1 && block_col == 2){
 		for(i = 3; i<6; i++){
 			for(j = 6; j<9; j++){
 				if(board[i][j] == val)
 				return 0;
 			}
 		}
-	}
-	if(block_row == 2 && block_col == 0){
+	}else if(block_row == 2 && block_col == 0){
 		for(i = 6; i<9; i++){
 			for(j = 0; j<3; j++){
 				if(board[i][j] == val)
 				return 0;
 			}
 		}
-	}
-	if(block_row == 2 && block_col == 1){
+	}else if(block_row == 2 && block_col == 1){
 		for(i = 6; i<9; i++){
 			for(j = 3; j<6; j++){
 				if(board[i][j] == val)
 				return 0;
 			}
 		}
-	}
-	if(block_row == 2 && block_col == 2){
+	}else{
 		for(i = 6; i<9; i++){
 			for(j = 6; j<9; j++){
 				if(board[i][j] == val)

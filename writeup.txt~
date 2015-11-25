@@ -1,0 +1,24 @@
+1.
+	Cat Felts
+
+2.
+	I think all of my server/client code is working.
+
+3.
+	-I tested my server running with multiple participants and no observers, multiple observers and no participants,
+	 single participant and single observer, single participant and multiple observers, and finally a single observer and multiple participants.
+	-I tested participants submitting invalid usernames using non alphanumeric chars, usernames that are already in use, and usernames that are too long.
+	-I tested participants making invalid moves such as A1e, 222, AAA, and values that are already part of the row, col, or block.
+
+4.
+	I thought the most challenging aspect of the assignment was trying to figure out the correct way to build strings
+	(like the message containing the board, validity of the last move, or the leaderboard) and then sending it over the connection
+	and recv'ing it on the other end as the same message. A lot of times the message would be good on the server side, then
+	once I sent it to the observer, the observer would recv garbage chars. Other times I would get a segfault, accidently trying
+	to read from memory that I did not have access too. I am not as familiar with c as others might be, so figuring out how to
+	allocate memory and only read from places I want to read from was difficult for me.
+
+5.
+	Making a team based game, so some users are on Team RED and other players are on Team GREEN and maybe some other players are on Team BLUE and so on.
+	The server would take in command line arguments for how many teams there were, and when participants wanted to connect, the server would also
+	assign them to a team. Any team member can make a move at any time, but each team only has 1 score instead of each player having an individual score.

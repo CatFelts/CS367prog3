@@ -1,8 +1,8 @@
 
 /* prog1_client.c - Modified from demo_client.c created by Brian Hutchinson.
- Lines 90+ written specifically for this assignment
- Cat Felts and Dannon Dixon
- CS 367, Assignment 1 */
+Lines 90+ written specifically for this assignment
+Cat Felts and Dannon Dixon
+CS 367, Assignment 1 */
 
 #include <stdio.h>
 #include <string.h>
@@ -15,23 +15,23 @@
 #include <netdb.h>
 
 
-#define DEBUG 1
+#define DEBUG 0
 /*------------------------------------------------------------------------
- * Program: client
- *
- * Purpose: allocate a socket, connect to a server, and print all output
- *
- * Syntax: client [ host [port] ]
- *
- * host - name of a computer on which server is executing
- * port - protocol port number server is using
- *
- * Note: Both arguments are optional. If no host name is specified,
- * the client uses "localhost"; if no protocol port is
- * specified, the client uses the default given by PROTOPORT.
- *
- *------------------------------------------------------------------------
- */
+* Program: client
+*
+* Purpose: allocate a socket, connect to a server, and print all output
+*
+* Syntax: client [ host [port] ]
+*
+* host - name of a computer on which server is executing
+* port - protocol port number server is using
+*
+* Note: Both arguments are optional. If no host name is specified,
+* the client uses "localhost"; if no protocol port is
+* specified, the client uses the default given by PROTOPORT.
+*
+*------------------------------------------------------------------------
+*/
 main( int argc, char **argv) {
   struct hostent *ptrh; /* pointer to a host table entry */
   struct protoent *ptrp; /* pointer to a protocol table entry */
@@ -56,7 +56,7 @@ main( int argc, char **argv) {
 
   port = atoi(argv[2]); /* convert to binary */
   if (port > 0) /* test for legal value */
-    sad.sin_port = htons((u_short)port);
+  sad.sin_port = htons((u_short)port);
   else {
     fprintf(stderr,"Error: bad port number %s\n",argv[2]);
     exit(EXIT_FAILURE);
@@ -126,20 +126,20 @@ main( int argc, char **argv) {
   uint32_t guess = -1;
   char response = -1;
   while(response != '0'){
-    fprintf(stderr, "Enter guess: \n");
-    scanf("%d",&guess);
-    guess = htonl(guess);
-    send(sd,&guess,4,0);
-    m = recv(sd, &response, 2, 0);
-    if(response == '1')
-      fprintf(stderr, "Warmer\n");
-    else if(response == '2')
-      fprintf(stderr, "Colder\n");
-    else if(response == '3')
-      fprintf(stderr, "Same\n");
-  }
-  fprintf(stderr, "You Win!\n");
-  close(sd);
-  exit(EXIT_SUCCESS);
-  */
+  fprintf(stderr, "Enter guess: \n");
+  scanf("%d",&guess);
+  guess = htonl(guess);
+  send(sd,&guess,4,0);
+  m = recv(sd, &response, 2, 0);
+  if(response == '1')
+  fprintf(stderr, "Warmer\n");
+  else if(response == '2')
+  fprintf(stderr, "Colder\n");
+  else if(response == '3')
+  fprintf(stderr, "Same\n");
+}
+fprintf(stderr, "You Win!\n");
+close(sd);
+exit(EXIT_SUCCESS);
+*/
 }

@@ -20,7 +20,7 @@
 #include <fcntl.h>
 #include <limits.h>
 
-#define DEBUG 1
+#define DEBUG 0
 #define MAX_ANSWER 3 //Max answer should be no more than 3 eg. A32 or P for pass
 #define MAX_LINE 1000
 #define BOARD_SIZE 9
@@ -110,7 +110,7 @@ int main( int argc, char **argv) {
 	}
 
 	//=============/!connect to server!/==============//
-	char username[62];
+	char username[200];
 	char username_valid = 'N';
 	#if DEBUG
 	printf("Participant %d connected to server! Hooray!\n", sd);
@@ -118,14 +118,20 @@ int main( int argc, char **argv) {
 	while(username_valid != 'Y'){
 
 		printf("Enter a username:\n");
-		scanf("%s", username);
+		fgets(username, sizeof(username), stdin);
+		size_t len = strlen(username)-1;
+		if(username[len] == '\n')
+		username[len] = '\0';
+		#if DEBUG
+		fprintf(stderr, "entered username length = %d\n", (int)len);
+		#endif
 		if(send(sd, &username, sizeof(username), 0) <= 0){
 			fprintf(stderr, "Error: Send username to server failed.\n");
 			exit(EXIT_FAILURE);
 		}
 
 		#if DEBUG
-		printf("username %s sent to server.", username);
+		printf("username %s sent to server.\n", username);
 		#endif
 		//recv validity of username from server
 		if(recv(sd, &username_valid, sizeof(username_valid), 0)<= 0){
@@ -142,7 +148,8 @@ int main( int argc, char **argv) {
 
 		//make a move
 		printf("Enter a valid move: \n");
-		scanf("%s", input);
+
+		fgets(input, 1024, stdin);
 		#if DEBUG
 		printf("user entered the following move --> %s\n", input);
 		printf("size of input = %lu\n", sizeof(input));
